@@ -1,9 +1,8 @@
 """Inițializarea integrării iHidro HA."""
-import voluptuous as vol
-
 from __future__ import annotations
 
 import logging
+import voluptuous as vol
 from dataclasses import dataclass, field
 from typing import Any
 
