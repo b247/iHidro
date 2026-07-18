@@ -168,6 +168,13 @@ def safe_get(data: Any, *keys: str, default: Any = None) -> Any:
             return default
     return current if current is not None else default
 
+def _extract_list(data: Any, list_key: str) -> list:
+    """Extrage o listă dintr-un răspuns API care poate fi dict sau list."""
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        return data.get(list_key, []) or []
+    return []
 
 # ══════════════════════════════════════════════
 # Funcții pentru configurare conturi
@@ -378,73 +385,87 @@ def build_usage_entity(
     }
 
 async def async_submit_index_logic(hass, coordinator, index_value):
-    """The actual logic to send data to Hidroelectrica."""
+    """Logic to validate and send index to API."""
     uan = coordinator.uan
     api_client = coordinator.api_client
     
     try:
-        # 1. Get Data from Coordinator
+        # 1. Obținem datele brute din coordinator
         data = coordinator.data or {}
         
-        # 2. Extract POD & Installation (Your existing logic)
-        pods = data.get("pods", {})
-        # Note: Using your _extract_list logic here
-        pods_list = pods.get("result", {}).get("Data", {}).get("objPodData", [])
+        # ── EXTRACȚIE POD (Folosim safe_get și _extract_list pentru siguranță) ──
+        pods = data.get("pods") or {}
+        pods_data = safe_get(pods, "result", "Data", default={})
+        pods_list = _extract_list(pods_data, "objPodData")
         
         if not pods_list:
-            _LOGGER.error("No POD found for UAN %s", uan)
+            _LOGGER.error("Nu s-a găsit niciun POD pentru UAN %s", uan)
             return False
 
         pod_info = pods_list[0]
-        pod_value = pod_info.get("pod")
-        inst_number = pod_info.get("installation")
+        pod_value = pod_info.get("pod", "")
+        inst_number = pod_info.get("installation", "")
 
-        # 3. Prepare the reading
-        # Get previous readings to build the entities
-        prev_read = data.get("previous_meter_read", {})
-        read_list = prev_read.get("result", {}).get("Data", {}).get("objPreviousMeterReadData", [])
-        
-        if not read_list:
-            _LOGGER.error("Reading window might be closed for UAN %s", uan)
+        if not pod_value:
+            _LOGGER.error("POD-ul este gol pentru UAN %s", uan)
             return False
 
-        from .helpers import build_usage_entity # Import your existing helper
+        # ── EXTRACȚIE CITIRI ANTERIOARE ──
+        prev_read = data.get("previous_meter_read") or {}
+        prev_data = safe_get(prev_read, "result", "Data", default={})
+        read_list = _extract_list(prev_data, "objPreviousMeterReadData")
+        
+        if not read_list:
+            _LOGGER.error("Nu există date anterioare (fereastră închisă?) pentru UAN %s", uan)
+            return False
+
+        # 2. Pregătire date trimitere
         now_str = datetime.now().strftime("%d/%m/%Y")
         
+        # Construim entitățile de consum (una per registru)
         usage_entities = [
             build_usage_entity(reading, str(index_value), now_str)
             for reading in read_list
         ]
 
-        # 4. API Calls
-        user_id = api_client.user_id
+        user_id = api_client.user_id or ""
         acc_number = coordinator.account_number
 
-        # Validation
+        _LOGGER.debug(
+            "Trimitere autocitire: index=%s, POD=%s, Inst=%s (UAN=%s).",
+            index_value, pod_value, inst_number, uan
+        )
+
+        # 3. Validare la server
         validate = await api_client.async_get_meter_value(
             user_id, pod_value, inst_number, acc_number, usage_entities
         )
         
         if validate is None:
+            _LOGGER.error("Validarea indexului a eșuat la server (UAN %s).", uan)
             return False
 
-        # Actual Submit
+        # 4. Trimitere efectivă
         submit = await api_client.async_submit_self_meter_read(
             user_id, pod_value, inst_number, acc_number, usage_entities
         )
 
         if submit:
-            # 5. Success! Fire the event for your future automation
+            # SUCCESS! Firing the event for your Shelly automation
+            _LOGGER.info("Index %s trimis cu succes pentru UAN %s", index_value, uan)
+            
             hass.bus.async_fire(f"{DOMAIN}_index_success", {
                 "uan": uan,
                 "index_sent": float(index_value),
                 "pod": pod_value
             })
+            
+            # Refresh coordinator to show new data in sensors
             await coordinator.async_request_refresh()
             return True
             
         return False
 
     except Exception as err:
-        _LOGGER.exception("Error in submission logic: %s", err)
+        _LOGGER.exception("Eroare neașteptată în logica de trimitere: %s", err)
         return False
