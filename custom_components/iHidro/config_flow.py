@@ -1,22 +1,9 @@
-"""ConfigFlow și OptionsFlow pentru integrarea iHidro HA.
-
-Fluxul de configurare:
-  1. Utilizatorul introduce email + parolă  (+ update interval)
-  2. Se validează credențialele prin API (login real)
-  3. Se descoperă automat conturile (GetUserSetting)
-  4. Utilizatorul selectează conturile dorite
-
-OptionsFlow:
-  - Meniu principal cu: Setări cont
-  - Setări: modificare credențiale + interval + selecție conturi
-"""
-
 from __future__ import annotations
 
 import logging
+import voluptuous as vol
 from typing import Any
 
-import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
