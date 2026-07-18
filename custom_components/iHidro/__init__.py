@@ -1,4 +1,3 @@
-"""Inițializarea integrării iHidro HA."""
 from __future__ import annotations
 
 import logging
