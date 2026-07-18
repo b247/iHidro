@@ -4,7 +4,9 @@ import logging
 from datetime import datetime
 from typing import Any
 
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.selector import SelectOptionDict
+from homeassistant.components import persistent_notification
 
 from .const import DOMAIN
 
@@ -385,44 +387,35 @@ def build_usage_entity(
     }
 
 async def async_submit_index_logic(hass, coordinator, index_value):
-    """Logic to validate and send index to API."""
+    """Trimite indexul direct la server și afișează eroarea brută în caz de eșec."""
     uan = coordinator.uan
     api_client = coordinator.api_client
     
     try:
-        # 1. Obținem datele brute din coordinator
         data = coordinator.data or {}
         
-        # ── EXTRACȚIE POD (Folosim safe_get și _extract_list pentru siguranță) ──
+        # 1. Extracție date necesare (POD, Instalație)
         pods = data.get("pods") or {}
         pods_data = safe_get(pods, "result", "Data", default={})
         pods_list = _extract_list(pods_data, "objPodData")
         
         if not pods_list:
-            _LOGGER.error("Nu s-a găsit niciun POD pentru UAN %s", uan)
-            return False
+            raise HomeAssistantError(f"Eroare locală: Nu s-a găsit POD-ul pentru UAN {uan}")
 
         pod_info = pods_list[0]
         pod_value = pod_info.get("pod", "")
         inst_number = pod_info.get("installation", "")
 
-        if not pod_value:
-            _LOGGER.error("POD-ul este gol pentru UAN %s", uan)
-            return False
-
-        # ── EXTRACȚIE CITIRI ANTERIOARE ──
+        # 2. Extracție date anterioare pentru structura de trimitere
         prev_read = data.get("previous_meter_read") or {}
         prev_data = safe_get(prev_read, "result", "Data", default={})
         read_list = _extract_list(prev_data, "objPreviousMeterReadData")
         
         if not read_list:
-            _LOGGER.error("Nu există date anterioare (fereastră închisă?) pentru UAN %s", uan)
-            return False
+            raise HomeAssistantError("Eroare: Nu există date anterioare. Probabil fereastra de citire este închisă.")
 
-        # 2. Pregătire date trimitere
+        # 3. Pregătire payload
         now_str = datetime.now().strftime("%d/%m/%Y")
-        
-        # Construim entitățile de consum (una per registru)
         usage_entities = [
             build_usage_entity(reading, str(index_value), now_str)
             for reading in read_list
@@ -431,41 +424,41 @@ async def async_submit_index_logic(hass, coordinator, index_value):
         user_id = api_client.user_id or ""
         acc_number = coordinator.account_number
 
-        _LOGGER.debug(
-            "Trimitere autocitire: index=%s, POD=%s, Inst=%s (UAN=%s).",
-            index_value, pod_value, inst_number, uan
-        )
-
-        # 3. Validare la server
-        validate = await api_client.async_get_meter_value(
+        # 4. QUERY SINGUR: Trimitere directă
+        _LOGGER.debug("Se trimite query direct către SubmitSelfMeterRead...")
+        submit_res = await api_client.async_submit_self_meter_read(
             user_id, pod_value, inst_number, acc_number, usage_entities
         )
+
+        # 5. ANALIZA RĂSPUNSULUI BRUT
+        if submit_res is None:
+            raise HomeAssistantError("Serverul Hidroelectrica nu a răspuns (Timeout/Eroare conexiune).")
+
+        # Citim statusul de eroare direct din JSON-ul serverului
+        is_error = safe_get(submit_res, "result", "IsError", default=False)
+        error_message = safe_get(submit_res, "result", "ErrorMessage", default="Eroare necunoscută")
+
+        if is_error:
+            # AFIȘARE EROARE BRUTĂ DE LA SERVER
+            raise HomeAssistantError(f"Răspuns SEW: {error_message}")
+
+        # 6. SUCCES (IsError este false)
+        _LOGGER.info("Index %s înregistrat cu succes pentru UAN %s.", index_value, uan)
         
-        if validate is None:
-            _LOGGER.error("Validarea indexului a eșuat la server (UAN %s).", uan)
-            return False
+        # Trigger eveniment pentru automarea Shelly (Step 2)
+        hass.bus.async_fire(f"{DOMAIN}_index_success", {
+            "uan": uan,
+            "index_sent": float(index_value),
+            "pod": pod_value
+        })
 
-        # 4. Trimitere efectivă
-        submit = await api_client.async_submit_self_meter_read(
-            user_id, pod_value, inst_number, acc_number, usage_entities
-        )
+        # Forțăm un refresh al senzorilor să vedem indexul nou în HA
+        await coordinator.async_request_refresh()
+        return True
 
-        if submit:
-            # SUCCESS! Firing the event for your Shelly automation
-            _LOGGER.info("Index %s trimis cu succes pentru UAN %s", index_value, uan)
-            
-            hass.bus.async_fire(f"{DOMAIN}_index_success", {
-                "uan": uan,
-                "index_sent": float(index_value),
-                "pod": pod_value
-            })
-            
-            # Refresh coordinator to show new data in sensors
-            await coordinator.async_request_refresh()
-            return True
-            
-        return False
-
+    except HomeAssistantError:
+        # Re-ridicăm eroarea pentru a apărea caseta roșie în interfață
+        raise
     except Exception as err:
-        _LOGGER.exception("Eroare neașteptată în logica de trimitere: %s", err)
-        return False
+        _LOGGER.exception("Eroare critică la trimitere: %s", err)
+        raise HomeAssistantError(f"Excepție Python: {err}")
