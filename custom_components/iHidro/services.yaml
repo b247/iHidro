@@ -1,0 +1,20 @@
+trimite_index_manual:
+  name: "Trimite Index Manual"
+  description: "Trimite autocitirea indexului la Hidroelectrica pentru un cont specific."
+  fields:
+    uan:
+      name: "Cod UAN"
+      description: "Codul numeric al contului (Contract Account ID)."
+      required: true
+      example: "800123456"
+      selector:
+        text:
+    index:
+      name: "Index Nou"
+      description: "Valoarea indexului pe care vrei să îl trimiți."
+      required: true
+      example: 1234
+      selector:
+        number:
+          mode: box
+          unit_of_measurement: "kWh"
