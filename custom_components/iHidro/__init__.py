@@ -1,4 +1,5 @@
 """Inițializarea integrării iHidro HA."""
+import voluptuous as vol
 
 from __future__ import annotations
 
@@ -212,6 +213,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.runtime_data = HidroelectricaRuntimeData(
         coordinators=coordinators,
         api_client=api_client,
+    )
+
+    # EM index send handler
+    async def handle_trimite_index(call):
+        """Service call handler."""
+        uan = call.data.get("uan")
+        index_val = call.data.get("index")
+        
+        # Access the coordinators from runtime_data (where you saved them earlier)
+        # entry.runtime_data is the HidroelectricaRuntimeData object you defined
+        coordinator = entry.runtime_data.coordinators.get(uan)
+        
+        if not coordinator:
+            _LOGGER.error("UAN %s nu a fost găsit în această instanță.", uan)
+            return
+
+        from .helpers import async_submit_index_logic
+        await async_submit_index_logic(hass, coordinator, index_val)
+
+    hass.services.async_register(
+        DOMAIN,
+        "trimite_index_manual",
+        handle_trimite_index,
+        schema=vol.Schema({
+            vol.Required("uan"): cv.string,
+            vol.Required("index"): cv.positive_int,
+        }),
     )
 
     # Încărcăm platformele (sensor + button)
