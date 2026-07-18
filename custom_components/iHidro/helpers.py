@@ -1,4 +1,5 @@
 """Funcții și constante utilitare pentru integrarea iHidro HA."""
+import logging
 
 from __future__ import annotations
 
@@ -7,6 +8,10 @@ from typing import Any
 
 from homeassistant.helpers.selector import SelectOptionDict
 
+from .const import DOMAIN
+
+
+_LOGGER = logging.getLogger(__name__)
 
 # ══════════════════════════════════════════════
 # Mapping-uri luni și tipuri citire
@@ -373,3 +378,75 @@ def build_usage_entity(
         "newmeterread": new_meter_read,
         "NewMeterReadDate": new_meter_read_date,
     }
+
+async def async_submit_index_logic(hass, coordinator, index_value):
+    """The actual logic to send data to Hidroelectrica."""
+    uan = coordinator.uan
+    api_client = coordinator.api_client
+    
+    try:
+        # 1. Get Data from Coordinator
+        data = coordinator.data or {}
+        
+        # 2. Extract POD & Installation (Your existing logic)
+        pods = data.get("pods", {})
+        # Note: Using your _extract_list logic here
+        pods_list = pods.get("result", {}).get("Data", {}).get("objPodData", [])
+        
+        if not pods_list:
+            _LOGGER.error("No POD found for UAN %s", uan)
+            return False
+
+        pod_info = pods_list[0]
+        pod_value = pod_info.get("pod")
+        inst_number = pod_info.get("installation")
+
+        # 3. Prepare the reading
+        # Get previous readings to build the entities
+        prev_read = data.get("previous_meter_read", {})
+        read_list = prev_read.get("result", {}).get("Data", {}).get("objPreviousMeterReadData", [])
+        
+        if not read_list:
+            _LOGGER.error("Reading window might be closed for UAN %s", uan)
+            return False
+
+        from .helpers import build_usage_entity # Import your existing helper
+        now_str = datetime.now().strftime("%d/%m/%Y")
+        
+        usage_entities = [
+            build_usage_entity(reading, str(index_value), now_str)
+            for reading in read_list
+        ]
+
+        # 4. API Calls
+        user_id = api_client.user_id
+        acc_number = coordinator.account_number
+
+        # Validation
+        validate = await api_client.async_get_meter_value(
+            user_id, pod_value, inst_number, acc_number, usage_entities
+        )
+        
+        if validate is None:
+            return False
+
+        # Actual Submit
+        submit = await api_client.async_submit_self_meter_read(
+            user_id, pod_value, inst_number, acc_number, usage_entities
+        )
+
+        if submit:
+            # 5. Success! Fire the event for your future automation
+            hass.bus.async_fire(f"{DOMAIN}_index_success", {
+                "uan": uan,
+                "index_sent": float(index_value),
+                "pod": pod_value
+            })
+            await coordinator.async_request_refresh()
+            return True
+            
+        return False
+
+    except Exception as err:
+        _LOGGER.exception("Error in submission logic: %s", err)
+        return False
