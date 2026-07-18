@@ -1,0 +1,68 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configurare Hidroelectrica",
+        "description": "Introduceți datele de autentificare pentru contul Hidroelectrica.",
+        "data": {
+          "username": "Nume utilizator (email)",
+          "password": "Parolă",
+          "update_interval": "Interval actualizare (secunde)"
+        }
+      },
+      "select_accounts": {
+        "title": "Selectare conturi",
+        "description": "Selectați conturile pe care doriți să le monitorizați.",
+        "data": {
+          "select_all": "Selectează toate conturile",
+          "selected_accounts": "Conturi"
+        }
+      }
+    },
+    "error": {
+      "auth_failed": "Autentificare eșuată. Verificați numele de utilizator și parola.",
+      "no_data": "Nu s-au găsit conturi după autentificare.",
+      "no_account_selected": "Selectați cel puțin un cont.",
+      "unknown": "A apărut o eroare neașteptată."
+    },
+    "abort": {
+      "already_configured": "Acest cont este deja configurat."
+    }
+  },
+  "options": {
+    "error": {
+      "auth_failed": "Autentificare eșuată. Verificați numele de utilizator și parola.",
+      "no_data": "Nu s-au găsit conturi după autentificare.",
+      "no_account_selected": "Selectați cel puțin un cont.",
+      "unknown": "A apărut o eroare neașteptată."
+    },
+    "step": {
+      "init": {
+        "title": "Setări Hidroelectrica",
+        "description": "Selectați categoria de gestionat",
+        "menu_options": {
+          "setari": "Setări cont"
+        }
+      },
+      "setari": {
+        "title": "Setări cont",
+        "description": "Actualizați credențialele și setările.",
+        "data": {
+          "username": "Nume utilizator (email)",
+          "password": "Parolă",
+          "update_interval": "Interval actualizare (secunde)"
+        }
+      },
+      "select_accounts": {
+        "title": "Selectare conturi",
+        "description": "Actualizați conturile pe care doriți să le monitorizați.",
+        "data": {
+          "select_all": "Selectează toate conturile",
+          "selected_accounts": "Conturi"
+        }
+      }
+    }
+  },
+  "issues": {
+  }
+}
